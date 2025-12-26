@@ -1,1 +1,6 @@
-// Flows will be imported for their side effects in this file.
+import { config } from 'dotenv';
+config();
+
+import '@/ai/flows/live-camera-face-recognition.ts';
+import '@/ai/flows/lecture-info-auto-population.ts';
+import '@/ai/flows/dashboard-summary-generator.ts';
