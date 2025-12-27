@@ -14,10 +14,6 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { StudentProfile } from './student-profile';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
-
-const getStudentImage = (studentId: string) => 
-  PlaceHolderImages.find(img => img.id === `student-${studentId.slice(-1)}`);
 
 export const columns: ColumnDef<Student>[] = [
   {
@@ -25,24 +21,23 @@ export const columns: ColumnDef<Student>[] = [
     header: 'Name',
     cell: ({ row }) => {
       const student = row.original;
-      const studentImage = getStudentImage(student.id);
       return (
         <Sheet>
           <SheetTrigger asChild>
             <div className="flex items-center gap-3 cursor-pointer group">
               <Avatar>
-                <AvatarImage src={student.avatarUrl} alt={student.name} data-ai-hint={studentImage?.imageHint} />
+                <AvatarImage src={student.avatarUrl} alt={student.name} />
                 <AvatarFallback>{student.name.charAt(0)}</AvatarFallback>
               </Avatar>
               <span className="font-medium group-hover:underline">{student.name}</span>
             </div>
           </SheetTrigger>
-          <SheetContent>
+          <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
             <SheetHeader>
               <SheetTitle>Student Profile</SheetTitle>
               <SheetDescription>Detailed attendance summary for {student.name}.</SheetDescription>
             </SheetHeader>
-            <StudentProfile student={student} />
+            <StudentProfile studentId={student.id} />
           </SheetContent>
         </Sheet>
       );
@@ -80,12 +75,12 @@ export const columns: ColumnDef<Student>[] = [
               View Profile
             </Button>
           </SheetTrigger>
-          <SheetContent>
+          <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
              <SheetHeader>
               <SheetTitle>Student Profile</SheetTitle>
               <SheetDescription>Detailed attendance summary for {row.original.name}.</SheetDescription>
             </SheetHeader>
-            <StudentProfile student={row.original} />
+            <StudentProfile studentId={row.original.id} />
           </SheetContent>
         </Sheet>
       );

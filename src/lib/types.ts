@@ -1,5 +1,5 @@
 export type Student = {
-  id: string;
+  id: string | number;
   name: string;
   standard: string;
   division: string;
@@ -10,7 +10,7 @@ export type Student = {
 };
 
 export type Lecture = {
-  id: string;
+  id: string | number;
   subject: string;
   date: string;
   startTime: string;
@@ -31,7 +31,7 @@ export type AttendanceRecord = {
 
 export type Camera = {
   id: string;
-  status: 'Active' | 'Offline';
+  status: 'Active' | 'Offline' | 'loading';
   currentLecture?: string;
   attendanceActive: boolean;
   markedCount: number;

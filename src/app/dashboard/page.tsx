@@ -1,3 +1,4 @@
+
 'use client';
 
 import {
@@ -22,18 +23,9 @@ import {
 import { Pie, PieChart, Cell } from 'recharts';
 import type { ChartConfig } from '@/components/ui/chart';
 import DashboardSummary from './components/dashboard-summary';
-
-const kpiData = [
-  { title: 'Total Cameras', value: '5', icon: Video, color: 'text-blue-500' },
-  { title: 'Active Cameras', value: '4', icon: Activity, color: 'text-green-500' },
-  { title: 'Lectures Running', value: '3', icon: CheckCircle, color: 'text-indigo-500' },
-  { title: 'Total Students', value: '250', icon: Users, color: 'text-purple-500' },
-];
-
-const chartData = [
-  { status: 'Present', count: 210, fill: 'var(--color-present)' },
-  { status: 'Absent', count: 40, fill: 'var(--color-absent)' },
-];
+import { useEffect, useState } from 'react';
+import { getDashboardKPIs } from '@/lib/api';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const chartConfig = {
   present: {
@@ -47,6 +39,36 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 export default function DashboardPage() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true);
+        const kpiData = await getDashboardKPIs();
+        setData(kpiData);
+      } catch (error) {
+        console.error("Failed to fetch dashboard data:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const kpiData = [
+    { title: 'Total Cameras', value: data?.total_cameras ?? '...', icon: Video, color: 'text-blue-500' },
+    { title: 'Active Cameras', value: data?.active_cameras ?? '...', icon: Activity, color: 'text-green-500' },
+    { title: 'Lectures Running', value: data?.active_lectures ?? '...', icon: CheckCircle, color: 'text-indigo-500' },
+    { title: 'Total Students', value: data?.total_students ?? '...', icon: Users, color: 'text-purple-500' },
+  ];
+
+  const chartData = [
+    { status: 'Present', count: data?.today_attendance.present_count ?? 0, fill: 'var(--color-present)' },
+    { status: 'Absent', count: data?.today_attendance.absent_count ?? 0, fill: 'var(--color-absent)' },
+  ];
+
   return (
     <>
       <PageHeader
@@ -61,7 +83,7 @@ export default function DashboardPage() {
               <kpi.icon className={`h-4 w-4 text-muted-foreground ${kpi.color}`} />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{kpi.value}</div>
+              {loading ? <Skeleton className="h-8 w-1/2" /> : <div className="text-2xl font-bold">{kpi.value}</div>}
             </CardContent>
           </Card>
         ))}
@@ -69,31 +91,33 @@ export default function DashboardPage() {
       <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle>Attendance Today</CardTitle>
+            <CardTitle>Attendance Today ({data?.today_attendance.percentage.toFixed(1)}%)</CardTitle>
           </CardHeader>
           <CardContent className="flex justify-center">
-            <ChartContainer
-              config={chartConfig}
-              className="mx-auto aspect-square h-[250px]"
-            >
-              <PieChart>
-                <ChartTooltip
-                  cursor={false}
-                  content={<ChartTooltipContent hideLabel />}
-                />
-                <Pie
-                  data={chartData}
-                  dataKey="count"
-                  nameKey="status"
-                  innerRadius={60}
-                  strokeWidth={5}
-                >
-                  {chartData.map((entry, index) => (
-                     <Cell key={`cell-${index}`} fill={entry.fill} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ChartContainer>
+            {loading ? <Skeleton className="h-[250px] w-[250px] rounded-full" /> : (
+              <ChartContainer
+                config={chartConfig}
+                className="mx-auto aspect-square h-[250px]"
+              >
+                <PieChart>
+                  <ChartTooltip
+                    cursor={false}
+                    content={<ChartTooltipContent hideLabel />}
+                  />
+                  <Pie
+                    data={chartData}
+                    dataKey="count"
+                    nameKey="status"
+                    innerRadius={60}
+                    strokeWidth={5}
+                  >
+                    {chartData.map((entry, index) => (
+                       <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ChartContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -103,13 +127,15 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <DashboardSummary />
-            <Alert variant="destructive" className="mt-4">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Camera Offline</AlertTitle>
-              <AlertDescription>
-                Camera C104 is currently offline. Please check the connection.
-              </AlertDescription>
-            </Alert>
+            {data?.offline_cameras?.length > 0 && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Camera Offline</AlertTitle>
+                <AlertDescription>
+                  Camera(s) {data.offline_cameras.join(', ')} are currently offline. Please check connections.
+                </AlertDescription>
+              </Alert>
+            )}
           </CardContent>
         </Card>
       </div>

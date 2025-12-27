@@ -12,25 +12,79 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { lectures } from '@/lib/data';
-import type { Student } from '@/lib/types';
+import { getStudentSummary } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { Skeleton } from '@/components/ui/skeleton';
 
-export function StudentProfile({ student }: { student: Student }) {
-  const studentLectures = lectures.filter(
-    (l) => l.standard === student.standard && l.division === student.division
-  );
+export function StudentProfile({ studentId }: { studentId: string | number }) {
+  const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchSummary() {
+      setLoading(true);
+      try {
+        const data = await getStudentSummary(studentId);
+        setSummary(data);
+      } catch (error) {
+        console.error(`Failed to fetch summary for student ${studentId}`, error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchSummary();
+  }, [studentId]);
+
+  if (loading) {
+    return (
+      <div className="py-4 space-y-6">
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-20 w-20 rounded-full" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-4 w-16" />
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Overall Attendance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-10 w-24 mb-4" />
+            <Skeleton className="h-4 w-full" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Lecture-wise Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!summary) {
+    return <p>Could not load student summary.</p>;
+  }
 
   return (
     <div className="py-4 space-y-6">
       <div className="flex items-center gap-4">
         <Avatar className="h-20 w-20">
-          <AvatarImage src={student.avatarUrl} alt={student.name} />
-          <AvatarFallback className="text-2xl">{student.name.charAt(0)}</AvatarFallback>
+          <AvatarImage src={summary.avatarUrl} alt={summary.student_name} />
+          <AvatarFallback className="text-2xl">{summary.student_name.charAt(0)}</AvatarFallback>
         </Avatar>
         <div>
-          <h2 className="text-xl font-semibold">{student.name}</h2>
+          <h2 className="text-xl font-semibold">{summary.student_name}</h2>
           <p className="text-sm text-muted-foreground">
-            {student.standard} - {student.division}
+            {summary.standard} - {summary.division}
           </p>
         </div>
       </div>
@@ -41,13 +95,13 @@ export function StudentProfile({ student }: { student: Student }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-4xl font-bold">{student.overallAttendance}%</span>
+            <span className="text-4xl font-bold">{summary.attendance_percentage}%</span>
             <div className="text-right">
-              <p>{student.presentCount} Present</p>
-              <p>{student.absentCount} Absent</p>
+              <p>{summary.present_count} Present</p>
+              <p>{summary.absent_count} Absent</p>
             </div>
           </div>
-          <Progress value={student.overallAttendance} className="w-full" />
+          <Progress value={summary.attendance_percentage} className="w-full" />
         </CardContent>
       </Card>
       
@@ -65,13 +119,13 @@ export function StudentProfile({ student }: { student: Student }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {studentLectures.map(lecture => (
-                <TableRow key={lecture.id}>
+              {summary.lectures.map((lecture: any) => (
+                <TableRow key={lecture.lecture_id}>
                   <TableCell>{lecture.subject}</TableCell>
                   <TableCell>{lecture.date}</TableCell>
                   <TableCell>
-                    <Badge variant={Math.random() > 0.2 ? 'default' : 'destructive'}>
-                      {Math.random() > 0.2 ? 'Present' : 'Absent'}
+                    <Badge variant={lecture.present ? 'default' : 'destructive'}>
+                      {lecture.present ? 'Present' : 'Absent'}
                     </Badge>
                   </TableCell>
                 </TableRow>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageHeader } from '@/components/page-header';
 import {
   Select,
@@ -26,39 +26,73 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Download, RefreshCw } from 'lucide-react';
-import { lectures, attendance, students } from '@/lib/data';
+import { getLectures, getAttendanceForLecture, getAttendanceStats } from '@/lib/api';
+import type { Lecture, AttendanceRecord } from '@/lib/types';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const statCards = [
-  { title: 'Total Students', key: 'total' },
-  { title: 'Present', key: 'present' },
-  { title: 'Absent', key: 'absent' },
-  { title: 'Attendance %', key: 'percentage' },
+  { title: 'Total Students', key: 'total_students' },
+  { title: 'Present', key: 'present_count' },
+  { title: 'Absent', key: 'absent_count' },
+  { title: 'Attendance %', key: 'attendance_percentage' },
 ];
 
 export default function AttendancePage() {
-  const [selectedLecture, setSelectedLecture] = useState(lectures[0].id);
+  const [lectures, setLectures] = useState<Lecture[]>([]);
+  const [selectedLecture, setSelectedLecture] = useState<string>('');
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const lecture = lectures.find((l) => l.id === selectedLecture);
-  const attendanceRecords = attendance[selectedLecture] || [];
-  
-  const presentCount = attendanceRecords.filter(r => r.status === 'Present').length;
-  const studentsInClass = students.filter(s => s.standard === lecture?.standard && s.division === lecture.division).length;
-  const absentCount = studentsInClass - presentCount;
-  const attendancePercentage = studentsInClass > 0 ? Math.round((presentCount / studentsInClass) * 100) : 0;
+  useEffect(() => {
+    async function fetchLectures() {
+      try {
+        const lecturesData = await getLectures();
+        setLectures(lecturesData);
+        if (lecturesData.length > 0) {
+          setSelectedLecture(String(lecturesData[0].id));
+        } else {
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Failed to fetch lectures", error);
+        setLoading(false);
+      }
+    }
+    fetchLectures();
+  }, []);
 
-  const stats = {
-    total: studentsInClass,
-    present: presentCount,
-    absent: absentCount,
-    percentage: `${attendancePercentage}%`,
-  };
+  useEffect(() => {
+    if (!selectedLecture) return;
+
+    async function fetchAttendanceData() {
+      setLoading(true);
+      try {
+        const [recordsData, statsData] = await Promise.all([
+          getAttendanceForLecture(selectedLecture),
+          getAttendanceStats(selectedLecture),
+        ]);
+        setAttendanceRecords(recordsData.attendance);
+        setStats(statsData);
+      } catch (error) {
+        console.error(`Failed to fetch attendance for lecture ${selectedLecture}`, error);
+        setAttendanceRecords([]);
+        setStats(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchAttendanceData();
+  }, [selectedLecture]);
   
-  const allStudentRecords = students
-    .filter(s => s.standard === lecture?.standard && s.division === lecture.division)
-    .map(student => {
-      const record = attendanceRecords.find(r => r.studentId === student.id);
-      return record || { studentId: student.id, studentName: student.name, status: 'Absent' };
-    });
+  const handleDownload = () => {
+    if(!selectedLecture) return;
+    const url = `${process.env.NEXT_PUBLIC_API_URL}/attendance/csv/${selectedLecture}`;
+    window.open(url, '_blank');
+  }
+
+  const lecture = lectures.find((l) => String(l.id) === selectedLecture);
 
   return (
     <>
@@ -67,10 +101,10 @@ export default function AttendancePage() {
         description="Review attendance for specific lectures."
       >
         <div className="flex items-center gap-2">
-           <Button variant="outline">
+           <Button variant="outline" onClick={() => { if(selectedLecture) { /* re-fetch logic */ } }}>
             <RefreshCw /> Refresh
           </Button>
-          <Button>
+          <Button onClick={handleDownload} disabled={!selectedLecture}>
             <Download /> Download CSV
           </Button>
         </div>
@@ -83,7 +117,7 @@ export default function AttendancePage() {
           </SelectTrigger>
           <SelectContent>
             {lectures.map((l) => (
-              <SelectItem key={l.id} value={l.id}>
+              <SelectItem key={l.id} value={String(l.id)}>
                 {l.subject} - {l.date} ({l.startTime})
               </SelectItem>
             ))}
@@ -91,50 +125,80 @@ export default function AttendancePage() {
         </Select>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
-        {statCards.map((card) => (
-          <Card key={card.title}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{card.title}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats[card.key as keyof typeof stats]}</div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {loading ? <StatSkeletons /> : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+          {statCards.map((card) => (
+            <Card key={card.title}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{card.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {stats ? (stats[card.key] + (card.key === 'attendance_percentage' ? '%' : '')) : '...'}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
       
       <Card>
         <CardHeader>
-          <CardTitle>Student Records</CardTitle>
+          <CardTitle>Student Records for {lecture?.subject}</CardTitle>
         </CardHeader>
         <CardContent>
-           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Student Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Marked Time</TableHead>
-                <TableHead>Camera ID</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {allStudentRecords.map((record) => (
-                <TableRow key={record.studentId}>
-                  <TableCell>{record.studentName}</TableCell>
-                  <TableCell>
-                    <Badge variant={record.status === 'Present' ? 'default' : 'destructive'}>
-                      {record.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{record.markedTime || 'N/A'}</TableCell>
-                  <TableCell>{record.cameraId || 'N/A'}</TableCell>
+           {loading ? <TableSkeleton /> : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student Name</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Marked Time</TableHead>
+                  <TableHead>Camera ID</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {attendanceRecords.map((record, idx) => (
+                  <TableRow key={`${record.studentId}-${idx}`}>
+                    <TableCell>{record.studentName}</TableCell>
+                    <TableCell>
+                      <Badge variant={record.status === 'Present' ? 'default' : 'destructive'}>
+                        {record.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{record.markedTime || 'N/A'}</TableCell>
+                    <TableCell>{record.cameraId || 'N/A'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+           )}
         </CardContent>
       </Card>
     </>
   );
 }
+
+const StatSkeletons = () => (
+  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+    {Array.from({ length: 4 }).map((_, i) => (
+      <Card key={i}>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <Skeleton className="h-4 w-2/3" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-8 w-1/2" />
+        </CardContent>
+      </Card>
+    ))}
+  </div>
+);
+
+const TableSkeleton = () => (
+  <div className="space-y-4">
+    <Skeleton className="h-12 w-full" />
+    <Skeleton className="h-12 w-full" />
+    <Skeleton className="h-12 w-full" />
+    <Skeleton className="h-12 w-full" />
+  </div>
+)

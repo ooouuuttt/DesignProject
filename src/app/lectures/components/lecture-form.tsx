@@ -2,8 +2,6 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import { z } from 'zod';
-
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -15,22 +13,13 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { lectureFormSchema, type LectureCreate } from '@/lib/schemas';
+import { createLecture } from '@/lib/api';
 
-const formSchema = z.object({
-  subject: z.string().min(2, { message: 'Subject must be at least 2 characters.' }),
-  academicYear: z.string().regex(/^\d{4}-\d{2}$/, 'Invalid year format (e.g., 2024-25).'),
-  standard: z.string().min(1),
-  division: z.string().min(1),
-  classRoom: z.string().min(1),
-  date: z.string(),
-  startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM).'),
-  endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM).'),
-});
-
-export function LectureForm() {
+export function LectureForm({ onLectureCreated }: { onLectureCreated: () => void }) {
   const { toast } = useToast();
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<LectureCreate>({
+    resolver: zodResolver(lectureFormSchema),
     defaultValues: {
       subject: '',
       academicYear: '2024-25',
@@ -43,12 +32,23 @@ export function LectureForm() {
     },
   });
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log(values);
-    toast({
-      title: 'Lecture Scheduled',
-      description: `Lecture for ${values.subject} has been created successfully.`,
-    });
+  async function onSubmit(values: LectureCreate) {
+    try {
+      await createLecture(values);
+      toast({
+        title: 'Lecture Scheduled',
+        description: `Lecture for ${values.subject} has been created successfully.`,
+      });
+      onLectureCreated();
+      form.reset();
+    } catch (error) {
+      console.error("Failed to create lecture:", error);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to create the lecture. Please check the details and try again.',
+      });
+    }
   }
 
   return (
@@ -100,7 +100,7 @@ export function LectureForm() {
             <FormItem>
               <FormLabel>Standard</FormLabel>
               <FormControl>
-                <Input placeholder="e.g. 12th" {...field} />
+                <Input placeholder="e.g. 12" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -161,7 +161,9 @@ export function LectureForm() {
           />
         </div>
         <div className="col-span-2 text-right">
-          <Button type="submit">Submit</Button>
+          <Button type="submit" disabled={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Submitting...' : 'Submit'}
+          </Button>
         </div>
       </form>
     </Form>

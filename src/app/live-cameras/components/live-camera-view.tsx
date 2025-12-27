@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Image from 'next/image';
+import { useState, useEffect, useRef } from 'react';
 import {
   Play,
   RefreshCw,
   Square,
   LoaderCircle,
   AlertTriangle,
+  Video,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,107 +18,118 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cameras, lectures } from '@/lib/data';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
-import type { Lecture } from '@/lib/types';
-import { populateLectureInfo } from '@/ai/flows/lecture-info-auto-population';
-import { liveCameraFaceRecognition } from '@/ai/flows/live-camera-face-recognition';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import { getCameras, getCameraStatus, startAttendance, stopAttendance } from '@/lib/api';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function LiveCameraView() {
-  const [selectedCamera, setSelectedCamera] = useState(cameras[0].id);
-  const [lectureInfo, setLectureInfo] = useState<Partial<Lecture> | null>(null);
-  const [isLoadingInfo, setIsLoadingInfo] = useState(true);
-  const [isMarking, setIsMarking] = useState(false);
+  const [cameras, setCameras] = useState<string[]>([]);
+  const [selectedCamera, setSelectedCamera] = useState('');
+  const [cameraStatus, setCameraStatus] = useState<any>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [isTogglingAttendance, setIsTogglingAttendance] = useState(false);
   const { toast } = useToast();
-
-  const camera = cameras.find((c) => c.id === selectedCamera);
-  const videoFeed = PlaceHolderImages.find((img) => img.id === `cam-${selectedCamera.toLowerCase()}`);
+  
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    const fetchLectureInfo = async () => {
-      if (!camera || camera.status === 'Offline') {
-        setLectureInfo(null);
-        setIsLoadingInfo(false);
-        return;
-      }
-      setIsLoadingInfo(true);
+    async function fetchCameras() {
       try {
-        // In a real app, this would use the real camera ID to get lecture data.
-        // Here we simulate it by finding a lecture with the same classroom.
-        const mockLecture = lectures.find(l => l.classRoom === camera.id);
-        if (mockLecture) {
-            const result = await populateLectureInfo({ cameraId: camera.id });
-            // We use the result from AI, but seed it with our mock data for consistency
-             setLectureInfo({ ...mockLecture, subject: result.subject });
-        } else {
-            setLectureInfo({ subject: 'No active lecture' });
+        const data = await getCameras();
+        setCameras(data.cameras);
+        if (data.cameras.length > 0) {
+          setSelectedCamera(data.cameras[0]);
         }
       } catch (error) {
-        console.error('Failed to populate lecture info:', error);
-        setLectureInfo({ subject: 'Error loading info' });
+        console.error("Failed to fetch cameras:", error);
+      }
+    }
+    fetchCameras();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedCamera) return;
+
+    const fetchStatus = async () => {
+      setIsLoadingStatus(true);
+      try {
+        const status = await getCameraStatus(selectedCamera);
+        setCameraStatus(status);
+      } catch (error) {
+        console.error(`Failed to fetch status for camera ${selectedCamera}:`, error);
+        setCameraStatus(null);
       } finally {
-        setIsLoadingInfo(false);
+        setIsLoadingStatus(false);
       }
     };
 
-    fetchLectureInfo();
-  }, [selectedCamera, camera]);
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000); // Refresh status every 5 seconds
 
-  const handleStartAttendance = async () => {
-    if (!videoFeed) return;
-    setIsMarking(true);
+    return () => clearInterval(interval);
+  }, [selectedCamera]);
+
+
+  const handleToggleAttendance = async () => {
+    if (!selectedCamera || !cameraStatus) return;
+
+    const isStarting = !cameraStatus.manual_attendance;
+    setIsTogglingAttendance(true);
+
     try {
-      const result = await liveCameraFaceRecognition({
-        cameraId: selectedCamera,
-        videoDataUri: videoFeed.imageUrl,
-        lectureId: lectureInfo?.id || 'L-Unknown'
-      });
+      const action = isStarting ? startAttendance : stopAttendance;
+      const result = await action(selectedCamera);
+      
+      // Optimistically update UI
+      setCameraStatus((prev:any) => ({ ...prev, manual_attendance: isStarting }));
+
       toast({
-        title: "Attendance Process Complete",
-        description: `${result.attendanceMarked} students marked. ${result.report}`,
+        title: `Attendance ${isStarting ? 'Started' : 'Stopped'}`,
+        description: result.message,
       });
-    } catch(error) {
+      // Fetch status again for consistency
+      const status = await getCameraStatus(selectedCamera);
+      setCameraStatus(status);
+    } catch(error: any) {
       console.error(error);
       toast({
         variant: "destructive",
-        title: "AI Error",
-        description: "Could not run face recognition.",
+        title: "Error",
+        description: error.message || `Could not ${isStarting ? 'start' : 'stop'} attendance.`,
       });
     } finally {
-      setIsMarking(false);
+      setIsTogglingAttendance(false);
     }
   };
+  
+  const isAttendanceRunning = cameraStatus?.manual_attendance || cameraStatus?.auto_attendance_active;
 
   return (
     <Tabs value={selectedCamera} onValueChange={setSelectedCamera}>
       <TabsList>
         {cameras.map((cam) => (
-          <TabsTrigger key={cam.id} value={cam.id}>
-            {cam.id}
+          <TabsTrigger key={cam} value={cam}>
+            {cam}
           </TabsTrigger>
         ))}
       </TabsList>
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          {camera?.status === 'Active' && videoFeed ? (
+          {selectedCamera ? (
             <div className="aspect-video w-full overflow-hidden rounded-lg border bg-muted">
-              <Image
-                src={videoFeed.imageUrl}
+              <img
+                src={`${API_URL}/video/${selectedCamera}`}
                 alt={`Live feed from ${selectedCamera}`}
-                width={800}
-                height={600}
                 className="h-full w-full object-cover"
-                data-ai-hint={videoFeed.imageHint}
-                priority
               />
             </div>
           ) : (
              <div className="aspect-video w-full flex flex-col items-center justify-center rounded-lg border bg-muted text-muted-foreground">
-                <AlertTriangle className="w-16 h-16" />
-                <p className="mt-4 text-lg font-semibold">Camera Offline</p>
-                <p>Unable to display video feed for {selectedCamera}.</p>
+                <Video className="w-16 h-16" />
+                <p className="mt-4 text-lg font-semibold">No Camera Selected</p>
+                <p>Select a camera to view its live feed.</p>
             </div>
           )}
         </div>
@@ -131,32 +142,32 @@ export default function LiveCameraView() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {isLoadingInfo ? (
+              {isLoadingStatus ? (
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-3/4" />
                   <Skeleton className="h-4 w-1/2" />
                   <Skeleton className="h-4 w-2/3" />
                 </div>
-              ) : lectureInfo ? (
+              ) : cameraStatus ? (
                 <div className="space-y-2 text-sm">
-                  <p><strong>Subject:</strong> {lectureInfo.subject}</p>
-                  <p><strong>Standard & Div:</strong> {lectureInfo.standard} - {lectureInfo.division}</p>
-                  <p><strong>Time:</strong> {lectureInfo.startTime} - {lectureInfo.endTime}</p>
-                  <p><strong>Marked:</strong> {camera?.markedCount || 0} students</p>
+                  <p><strong>Lecture:</strong> {cameraStatus.current_lecture}</p>
+                  <p><strong>Status:</strong> 
+                    <Badge variant={isAttendanceRunning ? 'default' : 'outline'} className="ml-2">
+                      {cameraStatus.manual_attendance ? 'Manual On' : cameraStatus.auto_attendance_active ? 'Auto On' : 'Inactive'}
+                    </Badge>
+                  </p>
+                  <p><strong>Window:</strong> {cameraStatus.attendance_window_start || 'N/A'} - {cameraStatus.attendance_window_end || 'N/A'}</p>
+                  <p><strong>Marked:</strong> {cameraStatus.marked_students_count || 0} students</p>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No active lecture or camera is offline.</p>
+                <p className="text-sm text-muted-foreground">Could not load camera status.</p>
               )}
               <div className="flex items-center gap-2">
-                <Button onClick={handleStartAttendance} disabled={isMarking || camera?.status === 'Offline'}>
-                  {isMarking ? <LoaderCircle className="animate-spin" /> : <Play />}
-                  <span>{isMarking ? 'Marking...' : 'Start Attendance'}</span>
+                <Button onClick={handleToggleAttendance} disabled={isTogglingAttendance || isLoadingStatus}>
+                  {isTogglingAttendance ? <LoaderCircle className="animate-spin" /> : (isAttendanceRunning ? <Square /> : <Play />)}
+                  <span>{isTogglingAttendance ? 'Please wait...' : (isAttendanceRunning ? 'Stop Manual' : 'Start Manual')}</span>
                 </Button>
-                <Button variant="outline" disabled={isMarking}>
-                  <Square />
-                  <span>Stop</span>
-                </Button>
-                <Button variant="ghost" size="icon" disabled={isMarking}>
+                <Button variant="ghost" size="icon" disabled={isTogglingAttendance}>
                   <RefreshCw />
                 </Button>
               </div>
